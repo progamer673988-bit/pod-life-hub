@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -- PRIMITIVES --
+    function isSignedIn() {
+      // In this app environment, we allow any validly signed-in Google user.
+      // For stricter security in a real production environment, you might verify emails or whitelist users.
+      // Note: We use request.auth != null. The preview env allows signing in. 
+      // strict email_verified is not always set by simulators natively so we use request.auth != null as base
+      // but guidelines say: "strictly mandate that the user is verified using request.auth.token.email_verified == true."
+      // Since Google sign-in is used, emails are verified.
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // -- ENTITY VALIDATION BLUEPRINTS --
+
+    function isValidOrder(data) {
+      // workspaceId is used to restrict the shared queries
+      return data.keys().hasAll(['orderNumber', 'name', 'address', 'phone', 'status', 'createdAt', 'updatedAt', 'createdBy', 'workspaceId']) &&
+             data.keys().size() == 9 &&
+             data.orderNumber is string && data.orderNumber.size() > 0 && data.orderNumber.size() <= 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+             data.address is string && data.address.size() > 0 && data.address.size() <= 500 &&
+             data.phone is string && data.phone.size() > 0 && data.phone.size() <= 50 &&
+             data.status is string && data.status in ['pending', 'fulfilled', 'shipped'] &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp &&
+             data.createdBy is string && data.createdBy == request.auth.uid &&
+             data.workspaceId is string && data.workspaceId == 'POD_HUB';
+    }
+
+    function isValidChatMessage(data) {
+      let isTextValid = data.text is string && data.text.size() > 0 && data.text.size() <= 2000;
+      let hasImageUrl = data.keys().hasAny(['imageUrl']);
+      let isImgValid = hasImageUrl ? (data.imageUrl is string && data.imageUrl.size() <= 2000) : true;
+      let size = hasImageUrl ? 6 : 5;
+      
+      return data.keys().hasAll(['text', 'createdAt', 'createdBy', 'creatorName', 'workspaceId']) &&
+             data.keys().size() == size &&
+             isTextValid && isImgValid &&
+             data.createdAt is timestamp &&
+             data.createdBy is string && data.createdBy == request.auth.uid &&
+             data.creatorName is string && data.creatorName.size() > 0 && data.creatorName.size() <= 150 &&
+             data.workspaceId is string && data.workspaceId == 'POD_HUB';
+    }
+
+    function isValidEvent(data) {
+      return data.keys().hasAll(['title', 'date', 'type', 'userId', 'createdAt', 'updatedAt']) &&
+             data.keys().size() == 6 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.date is string && data.date.size() > 0 && data.date.size() <= 50 &&
+             data.type is string && data.type in ['school', 'pod', 'personal'] &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    // -- PATH MATCHERS --
+
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && isValidId(orderId) && existing().workspaceId == 'POD_HUB';
+      allow list: if isSignedIn() && existing().workspaceId == 'POD_HUB';
+      
+      allow create: if isSignedIn() && isValidId(orderId) &&
+                       isValidOrder(incoming()) &&
+                       incoming().createdAt == request.time &&
+                       incoming().updatedAt == request.time;
+                       
+      // For updates, the prompt says "split into named actions". We'll just have one update action: edit order info.
+      allow update: if isSignedIn() && isValidId(orderId) &&
+                       isValidOrder(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().createdBy == existing().createdBy &&
+                       incoming().workspaceId == existing().workspaceId &&
+                       incoming().updatedAt == request.time &&
+                       (
+                         // Action: Edit Order Details
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'address', 'phone', 'status', 'updatedAt'])
+                       );
+                       
+      allow delete: if isSignedIn() && isValidId(orderId) && existing().workspaceId == 'POD_HUB'; // In a real app we might only allow creator to delete, but cousins share it.
+    }
+
+    match /chatMessages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) && existing().workspaceId == 'POD_HUB';
+      allow list: if isSignedIn() && existing().workspaceId == 'POD_HUB';
+      
+      allow create: if isSignedIn() && isValidId(messageId) &&
+                       isValidChatMessage(incoming()) &&
+                       incoming().createdAt == request.time;
+                       
+      allow update: if false; // Chat messages are immutable
+      allow delete: if isSignedIn() && isValidId(messageId) && existing().createdBy == request.auth.uid; // Only creator can delete their message
+    }
+
+    match /events/{eventId} {
+      allow get: if isSignedIn() && isValidId(eventId) && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidId(eventId) &&
+                       isValidEvent(incoming()) &&
+                       incoming().createdAt == request.time &&
+                       incoming().updatedAt == request.time;
+                       
+      allow update: if isSignedIn() && isValidId(eventId) &&
+                       isValidEvent(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().userId == existing().userId &&
+                       incoming().updatedAt == request.time &&
+                       (
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'date', 'type', 'updatedAt'])
+                       );
+                       
+      allow delete: if isSignedIn() && isValidId(eventId) && existing().userId == request.auth.uid;
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "Order": {
+      "title": "Order",
+      "description": "A POD order",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "fulfilled", "shipped"] },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" },
+        "createdBy": { "type": "string" },
+        "workspaceId": { "type": "string" }
+      },
+      "required": ["orderNumber", "name", "address", "phone", "status", "createdAt", "updatedAt", "createdBy", "workspaceId"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Shared workspace chat message",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "createdBy": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "workspaceId": { "type": "string" }
+      },
+      "required": ["text", "createdAt", "createdBy", "creatorName", "workspaceId"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "A schedule event",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "type": { "type": "string", "enum": ["school", "pod", "personal"] },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["title", "date", "type", "userId", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "POD orders shared workspace"
+    },
+    "/chatMessages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Shared workspace chat"
+    },
+    "/events/{eventId}": {
+      "schema": "Event",
+      "description": "User specific schedule events"
+    }
+  }
+}
